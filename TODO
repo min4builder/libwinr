@@ -1,11 +1,16 @@
-remove linux-specific crap (O_TMPFILE flag)
-standardize keycodes
-handle compose & deadkeys (https://xkbcommon.org/doc/current/group__compose.html)
-support long mouse sequences (graphics tablets)
-support client-side decorations (ugh)
-support HiDPI properly (https://wayland-book.com/surfaces-in-depth/hidpi.html)
-support touch
-implement X version
-implement linux fb version
-implement embedding
+package as a proper library
+devdraw
+portability:
+	remove linux-specific crap (O_TMPFILE flag)
+	standardize keycodes
+	port to X, framebuffer, devdraw
+minor features:
+	handle compose & deadkeys (https://xkbcommon.org/doc/current/group__compose.html)
+	support TTF fonts (sfnconv)
+	support long mouse sequences (graphics tablets)
+	support client-side decorations (ugh)
+	support HiDPI properly (https://wayland-book.com/surfaces-in-depth/hidpi.html)
+	support touch
+major features:
+	implement embedding (external binary?)
 

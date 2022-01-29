@@ -4,25 +4,53 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include "draw.h"
+#include "font.h"
 
 void
-fontopen(Font *f, char const *filename)
+fontopen(Font *f, char const *name)
 {
-	int fd = open(filename, O_RDONLY);
-	if (fd < 0)
-		perror("fontopen");
-	ssize_t len = lseek(fd, 0, SEEK_END);
-	if (len < 0)
-		perror("fontopen");
-	char *data = malloc(len);
-	size_t r = 0;
-	while(r < len)
-		r += pread(fd, data + r, len - r, r);
-	int err = ssfn_load(&f->ctx, data);
-	if (err)
-		printf("fontopen: %s\n", ssfn_error(err));
+	char path[4096];
+	char const *fontpath = getenv("FONTPATH");
+	char const *nextpath;
+	if (!fontpath)
+		fontpath = ".";
+	while (*fontpath) {
+		nextpath = strchr(fontpath, ':');
+		if (!nextpath)
+			nextpath = strchr(fontpath, '\0');
+		snprintf(path, sizeof(path), "%.*s/%s.sfn", (int) (nextpath - fontpath), fontpath, name);
+		fontpath = *nextpath ? nextpath + 1 : nextpath;
+
+		fprintf(stderr, "trying '%s' for '%s'...\n", path, name);
+		int fd = open(path, O_RDONLY);
+		if (fd < 0) {
+			if (*fontpath)
+				continue;
+			perror("fontopen");
+			return;
+		}
+
+		ssize_t len = lseek(fd, 0, SEEK_END);
+		if (len < 0) {
+			perror("fontopen");
+			return;
+		}
+
+		char *data = malloc(len);
+		size_t r = 0;
+		while(r < (size_t) len)
+			r += pread(fd, data + r, len - r, r);
+
+		int err = ssfn_load(&f->ctx, data);
+		if (err) {
+			fprintf(stderr, "fontopen: %s\n", ssfn_error(err));
+			return;
+		}
+		break;
+	}
 }
 
 void
@@ -42,8 +70,8 @@ drawtext(Fb *fb, Font *f, Point p, int color, char const *s, int len)
 		.w = rectw(fb->r), .h = recth(fb->r),
 		.fg = color,
 		.bg = 0,
-		.x = p.x,
-		.y = p.y + f->ctx.size /* XXX undocumented, font size as passed to select */
+		.x = fb->r.min.x + p.x,
+		.y = fb->r.min.y + p.y + f->ctx.size /* XXX undocumented, font size as passed to select */
 	};
 	Point max = Point(0, 0);
 	int prog = 0;

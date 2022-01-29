@@ -1,6 +1,6 @@
 #define _GNU_SOURCE /* ugh */
 #include <fcntl.h>
-#include <linux/input-event-codes.h>
+#include <linux/input-event-codes.h> /* BTN_* constants */
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -8,6 +8,10 @@
 #include <xkbcommon/xkbcommon.h>
 #include "xdg-shell-client-protocol.h"
 #include "draw.h"
+#include "win.h"
+
+static void bufdone(void *, struct wl_buffer *);
+static struct wl_buffer_listener buf_listener = { .release = bufdone };
 
 static void newglobal(void *, struct wl_registry *, uint32_t, char const *, uint32_t);
 static void delglobal(void *, struct wl_registry *, uint32_t);
@@ -55,24 +59,34 @@ doresize(Win *w)
 	if (w->buffer)
 		wl_buffer_destroy(w->buffer);
 
-	unsigned size = rectw(w->r) * 4 * recth(w->r);
+	unsigned size = rectw(w->r) * 4 * recth(w->r) * 2;
 	if (size > w->shmsize) {
 		ftruncate(w->shmfd, size);
 		wl_shm_pool_resize(w->pool, size);
 		w->shmsize = size;
 	}
 
-	if (w->fb.data)
-		munmap(w->fb.data, w->fb.s * recth(w->fb.r));
+	if (w->data) {
+		if (w->data < w->backdata)
+			munmap(w->data, w->fb.s * recth(w->fb.r) * 2);
+		else
+			munmap(w->backdata, w->fb.s * recth(w->fb.r) * 2);
+	}
 
-	w->fb.data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, w->shmfd, 0);
+	w->data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, w->shmfd, 0);
+	w->backdata = (char *) w->data + size/2;
+
+	w->fb.data = w->data;
 	w->fb.r = w->r;
 	w->fb.s = rectw(w->fb.r) * 4;
 
 	w->buffer = wl_shm_pool_create_buffer(w->pool, 0, rectw(w->fb.r), recth(w->fb.r), w->fb.s, WL_SHM_FORMAT_ARGB8888);
+	w->backbuffer = wl_shm_pool_create_buffer(w->pool, size/2, rectw(w->fb.r), recth(w->fb.r), w->fb.s, WL_SHM_FORMAT_ARGB8888);
+	wl_buffer_add_listener(w->buffer, &buf_listener, w);
 
 	xdg_surface_ack_configure(w->xdg_surf, w->configserial);
 	w->config = 0;
+	w->canrender = 1;
 }
 
 void
@@ -97,8 +111,9 @@ winopen(Win *w)
 	wl_surface_commit(w->surface);
 	wl_display_roundtrip(w->display);
 
+	/* linux-specific */
 	w->shmfd = open(".", O_TMPFILE | O_RDWR | O_EXCL | O_CLOEXEC, 0600);
-	w->shmsize = rectw(w->r) * 4 * recth(w->r);
+	w->shmsize = rectw(w->r) * 4 * recth(w->r) * 2;
 	ftruncate(w->shmfd, w->shmsize);
 	w->pool = wl_shm_create_pool(w->shm, w->shmfd, w->shmsize);
 
@@ -123,13 +138,21 @@ winclose(Win *w)
 void
 winflush(Win *w, Ekind wait)
 {
+	w->ev = Enone;
+	while (!w->canrender)
+		wl_display_dispatch(w->display);
 	if (w->fb.damaged) {
 		wl_surface_attach(w->surface, w->buffer, 0, 0);
 		wl_surface_damage(w->surface, w->fb.damage.min.x, w->fb.damage.min.y, w->fb.damage.max.x, w->fb.damage.max.y);
 		wl_surface_commit(w->surface);
 		w->fb.damaged = 0;
+		struct wl_buffer *b = w->buffer;
+		w->buffer = w->backbuffer;
+		w->backbuffer = b;
+		w->fb.data = w->backdata;
+		w->backdata = w->data;
+		w->data = w->fb.data;
 	}
-	w->ev = Enone;
 	while (!((wait | Eclosed | Eframe) & w->ev))
 		wl_display_dispatch(w->display);
 	doresize(w);
@@ -162,6 +185,13 @@ int
 winkeytext(Keypress kp, char *buf, int len)
 {
 	return xkb_keysym_to_utf8(kp.key, buf, len);
+}
+
+static void
+bufdone(void *w_, struct wl_buffer *buf)
+{
+	Win *w = w_;
+	w->canrender = 1;
 }
 
 static void
@@ -273,9 +303,9 @@ mscroll(void *w_, struct wl_pointer *m, uint32_t time, uint32_t axis, wl_fixed_t
 {
 	Win *w = w_;
 	Point s = { 0, 0 };
-	if (axis == 0)
+	if (axis == 1)
 		s.x = wl_fixed_to_int(value);
-	else if (axis == 1)
+	else if (axis == 0)
 		s.y = wl_fixed_to_int(value);
 	w->bufscroll = pointadd(w->bufscroll, s);
 	w->bufev |= Escroll;
@@ -290,6 +320,7 @@ mend(void *w_, struct wl_pointer *m)
 	w->bufscroll = Point(0, 0);
 	w->ev |= w->bufev;
 	w->bufev = Enone;
+	w->obut = w->but;
 	w->but = w->bufbut;
 }
 

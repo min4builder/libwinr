@@ -1,0 +1,12 @@
+prefix=@prefix@
+includedir=@includedir@
+libdir=@libdir@
+depends=@depends@
+
+Name: libwinr
+Description: creates a window and lets you render to it
+URL: https://github.com/Min4Builder/libwinr
+Version: 0.0
+CFlags: -I${includedir}
+Libs: -L${libdir} -lwinr
+Requires.private: ${depends}
