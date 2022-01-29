@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200809L
-#define SSFN_IMPLEMENTATION
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -8,9 +7,11 @@
 #include <unistd.h>
 #include "draw.h"
 #include "font.h"
+#define SSFN_IMPLEMENTATION
+#include "ssfn.h"
 
 void
-fontopen(Font *f, char const *name)
+fontopen(Font *f, char const *name, int size)
 {
 	char path[4096];
 	char const *fontpath = getenv("FONTPATH");
@@ -41,22 +42,43 @@ fontopen(Font *f, char const *name)
 
 		char *data = malloc(len);
 		size_t r = 0;
-		while(r < (size_t) len)
+		while (r < (size_t) len)
 			r += pread(fd, data + r, len - r, r);
 
-		int err = ssfn_load(&f->ctx, data);
+		f->ctx = calloc(1, sizeof(ssfn_t));
+		if (!f->ctx) {
+			perror("fontopen");
+			return;
+		}
+
+		int err = ssfn_load(f->ctx, data);
 		if (err) {
 			fprintf(stderr, "fontopen: %s\n", ssfn_error(err));
 			return;
 		}
 		break;
 	}
+	f->size = size;
+	int err = ssfn_select(f->ctx, SSFN_FAMILY_ANY, NULL, SSFN_STYLE_REGULAR, f->size);
+	if (err)
+		fprintf(stderr, "fontopen: %s\n", ssfn_error(err));
 }
 
 void
-fontselect(Font *f, int family, int style, int size)
+fontset(Font *f, int attr)
 {
-	int err = ssfn_select(&f->ctx, family, NULL, style, size);
+	int style = SSFN_STYLE_ABS_SIZE;
+	if (attr & Fbold)
+		style |= SSFN_STYLE_BOLD;
+	if (attr & Fitalic)
+		style |= SSFN_STYLE_ITALIC;
+	if (attr & Funderline)
+		style |= SSFN_STYLE_UNDERLINE;
+	if (attr & Fstrikethrough)
+		style |= SSFN_STYLE_STHROUGH;
+	if (attr & Frtl)
+		style |= SSFN_STYLE_RTL;
+	int err = ssfn_select(f->ctx, SSFN_FAMILY_ANY, NULL, style, f->size);
 	if (err)
 		printf("fontselect: %s\n", ssfn_error(err));
 }
@@ -71,20 +93,22 @@ drawtext(Fb *fb, Font *f, Point p, int color, char const *s, int len)
 		.fg = color,
 		.bg = 0,
 		.x = fb->r.min.x + p.x,
-		.y = fb->r.min.y + p.y + f->ctx.size /* XXX undocumented, font size as passed to select */
+		.y = fb->r.min.y + p.y + f->size
 	};
 	Point max = Point(0, 0);
 	int prog = 0;
 	while (len < 0 ? s[prog] : prog < len) {
-		int n = ssfn_render(&f->ctx, &dst, s + prog);
+		int n = ssfn_render(f->ctx, &dst, s + prog);
 		if (max.x < dst.x)
 			max.x = dst.x;
 		if (max.y < dst.y)
 			max.y = dst.y;
 		if (!n)
 			break;
-		if (n < 0)
+		if (n < 0) {
 			printf("drawtext: %s\n", ssfn_error(n));
+			n = 1;
+		}
 		prog += n;
 	}
 	fbdamage(fb, Rect(p, fb->r.max));
@@ -93,6 +117,7 @@ drawtext(Fb *fb, Font *f, Point p, int color, char const *s, int len)
 void
 fontclose(Font *f)
 {
-	ssfn_free(&f->ctx);
+	ssfn_free(f->ctx);
+	free(f->ctx);
 }
 

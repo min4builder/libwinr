@@ -31,9 +31,8 @@ This is alpha software. There will be some rough edges. Be careful.
         w.r = Rect(Point(0, 0), Point(800, 600));
         winopen(&w);
 
-        Font f = {0};
-        fontopen(&f, "default");
-        fontselect(&f, SSFN_FAMILY_SANS, SSFN_STYLE_REGULAR, 16);
+        Font f;
+        fontopen(&f, "default", 16);
 
         w.ev = Eframe;
 

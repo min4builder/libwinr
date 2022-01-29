@@ -14,7 +14,7 @@ all: libwinr.a libwinr.so libwinr.pc
 
 install: libwinr.a libwinr.so libwinr.pc
 	install -Dm644 -t $(DESTDIR)$(LIBDIR) libwinr.a libwinr.so
-	install -Dm644 -t $(DESTDIR)$(INCLUDEDIR)/winr draw.h ssfn.h font.h win.h
+	install -Dm644 -t $(DESTDIR)$(INCLUDEDIR)/winr draw.h font.h win.h
 	install -Dm644 libwinr.pc $(DESTDIR)$(PKGCONFDIR)/libwinr.pc
 
 libwinr.pc: libwinr.pc.in
@@ -41,4 +41,4 @@ xdg-shell-client-protocol.h:
 	wayland-scanner client-header > $@ < /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
 
 clean:
-	-$(RM) libwinr.a libwinr.pc $(OBJS)
+	-$(RM) libwinr.a libwinr.so libwinr.pc $(OBJS)

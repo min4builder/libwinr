@@ -1,5 +1,3 @@
-package as a proper library
-devdraw
 portability:
 	remove linux-specific crap (O_TMPFILE flag)
 	standardize keycodes
