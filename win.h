@@ -83,6 +83,9 @@ void winclose(Win *win);
 /* flush frame, wait for events in what */
 void winflush(Win *win, Ekind what);
 
+/* returns a file descriptor that can be used to poll, if necessary */
+int winpollfd(Win *win);
+
 /* add keypress to queue */
 void winaddkeypress(Win *win, Keypress key);
 /* get next keypress from window queue */

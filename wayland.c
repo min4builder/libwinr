@@ -158,6 +158,12 @@ winflush(Win *w, Ekind wait)
 	doresize(w);
 }
 
+int
+winpollfd(Win *w)
+{
+	return wl_display_get_fd(w->display);
+}
+
 void
 winaddkeypress(Win *w, Keypress kp)
 {
