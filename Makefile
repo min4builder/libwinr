@@ -10,10 +10,10 @@ DEPENDS = wayland-client xkbcommon
 OBJS = draw.o font.o wayland.o xdg-shell-protocol.o
 CFLAGS = -g -O3 -std=c99 -pedantic -Wall -Wextra -Wno-unused-parameter
 
-all: libwinr.a libwinr.pc
+all: libwinr.a libwinr.so libwinr.pc
 
-install: libwinr.a libwinr.pc
-	install -Dm644 libwinr.a $(DESTDIR)$(LIBDIR)/libwinr.a
+install: libwinr.a libwinr.so libwinr.pc
+	install -Dm644 -t $(DESTDIR)$(LIBDIR) libwinr.a libwinr.so
 	install -Dm644 -t $(DESTDIR)$(INCLUDEDIR)/winr draw.h ssfn.h font.h win.h
 	install -Dm644 libwinr.pc $(DESTDIR)$(PKGCONFDIR)/libwinr.pc
 
@@ -22,6 +22,9 @@ libwinr.pc: libwinr.pc.in
 
 libwinr.a: $(OBJS)
 	$(AR) rsc $@ $(OBJS)
+
+libwinr.so: $(OBJS) libwinr.pc
+	$(CC) -shared -o $@ -L. `pkg-config --static --libs --with-path=. libwinr`
 
 .c.o:
 	$(CC) $(CFLAGS) -c -o $@ $<
