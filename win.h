@@ -76,8 +76,8 @@ typedef struct {
 	int canrender;
 } Win;
 
-/* open and close windows */
-void winopen(Win *win);
+/* open and close windows; window size is a hint and may not be respected */
+void winopen(Win *win, Point size, char const *name);
 void winclose(Win *win);
 
 /* flush frame, wait for events in what */

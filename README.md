@@ -28,8 +28,7 @@ This is alpha software. There will be some rough edges. Be careful.
     main()
     {
         Win w;
-        w.r = Rect(Point(0, 0), Point(800, 600));
-        winopen(&w);
+        winopen(&w, Point(800, 600), "winr example");
 
         Font f;
         fontopen(&f, "default", 16);

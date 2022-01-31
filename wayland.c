@@ -90,8 +90,12 @@ doresize(Win *w)
 }
 
 void
-winopen(Win *w)
+winopen(Win *w, Point size, char const *title)
 {
+	memset(w, 0, sizeof(*w));
+
+	w->r.max = size;
+
 	w->kbctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 
 	w->display = wl_display_connect(NULL);
@@ -105,7 +109,7 @@ winopen(Win *w)
 	xdg_surface_add_listener(w->xdg_surf, &xdg_listener, w);
 
 	w->toplevel = xdg_surface_get_toplevel(w->xdg_surf);
-	xdg_toplevel_set_title(w->toplevel, "Test");
+	xdg_toplevel_set_title(w->toplevel, title);
 	xdg_toplevel_add_listener(w->toplevel, &toplevel_listener, w);
 
 	wl_surface_commit(w->surface);
