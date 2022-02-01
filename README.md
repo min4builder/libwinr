@@ -46,7 +46,7 @@ This is alpha software. There will be some rough edges. Be careful.
                 if (winkeytext(kp, buf, sizeof(buf)) > 0)
                     drawtext(&w.fb, &f, w.fb.r.min, 0xff444444, buf, -1);
             }
-            winflush(&w, Eframe | Ekey);
+            winflush(&w, Eclosed | Eframe | Ekey);
         } while (!(w.ev & Eclosed));
 
         winclose(&w);

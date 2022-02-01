@@ -143,9 +143,9 @@ void
 winflush(Win *w, Ekind wait)
 {
 	w->ev = Enone;
-	while (!w->canrender)
-		wl_display_dispatch(w->display);
 	if (w->fb.damaged) {
+		while (!w->canrender)
+			wl_display_dispatch(w->display);
 		wl_surface_attach(w->surface, w->buffer, 0, 0);
 		wl_surface_damage(w->surface, w->fb.damage.min.x, w->fb.damage.min.y, w->fb.damage.max.x, w->fb.damage.max.y);
 		wl_surface_commit(w->surface);
@@ -157,8 +157,9 @@ winflush(Win *w, Ekind wait)
 		w->backdata = w->data;
 		w->data = w->fb.data;
 	}
-	while (!((wait | Eclosed | Eframe) & w->ev))
+	do {
 		wl_display_dispatch(w->display);
+	} while (wait && !(wait & w->ev));
 	doresize(w);
 }
 
