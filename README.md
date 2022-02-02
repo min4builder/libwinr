@@ -20,6 +20,7 @@ This is alpha software. There will be some rough edges. Be careful.
 
 ## Example
 
+    // draw must be included before the others
     #include <winr/draw.h>
     #include <winr/font.h>
     #include <winr/win.h>
@@ -27,30 +28,31 @@ This is alpha software. There will be some rough edges. Be careful.
     int
     main()
     {
-        Win w;
-        winopen(&w, Point(800, 600), "winr example");
+        char buf[32];
+        Keypress kp;
+        Win *w;
+        Font *f;
 
-        Font f;
-        fontopen(&f, "default", 16);
+        w = winopen(Point(800, 600), "winr example");
+        f = fontopen("monospace", 16);
 
-        w.ev = Eframe;
+        w->ev = Eframe;
 
         do {
-            if (w.ev & Eframe) {
-                drawrect(&w.fb, w.fb.r, 0xffffffff);
-                drawtext(&w.fb, &f, w.fb.r.min, 0xff000000, "Hello, world!", -1);
+            if (w->ev & Eframe) {
+                drawrect(&w->fb, w->fb.r, 0xffffffff);
+                drawtext(&w->fb, &f, w->fb.r.min, 0xff000000, "Hello, world!", -1);
             }
-            if (w.ev & Ekey) {
-                char buf[32];
-                Keypress kp = winkeypress(&w);
+            if (w->ev & Ekey) {
+                kp = winkeypress(w);
                 if (winkeytext(kp, buf, sizeof(buf)) > 0)
-                    drawtext(&w.fb, &f, w.fb.r.min, 0xff444444, buf, -1);
+                    drawtext(&w->fb, &f, w->fb.r.min, 0xff444444, buf, -1);
             }
-            winflush(&w, Eclosed | Eframe | Ekey);
-        } while (!(w.ev & Eclosed));
+            winflush(w, Eclosed | Eframe | Ekey);
+        } while (!(w->ev & Eclosed));
 
-        winclose(&w);
-        fontclose(&f);
+        winclose(w);
+        fontclose(f);
 
         return 0;
     }

@@ -1,14 +1,18 @@
 #define _GNU_SOURCE /* ugh */
 #include <fcntl.h>
 #include <linux/input-event-codes.h> /* BTN_* constants */
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
+
 #include "xdg-shell-client-protocol.h"
 #include "draw.h"
 #include "win.h"
+
+#include "wayland.h"
 
 static void bufdone(void *, struct wl_buffer *);
 static struct wl_buffer_listener buf_listener = { .release = bufdone };
@@ -53,90 +57,94 @@ static struct xdg_toplevel_listener toplevel_listener = { .configure = winconfig
 static void
 doresize(Win *w)
 {
-	if (!w->config)
+	if (!w->d->config)
 		return;
 
-	if (w->buffer)
-		wl_buffer_destroy(w->buffer);
+	if (w->d->buffer)
+		wl_buffer_destroy(w->d->buffer);
 
 	unsigned size = rectw(w->r) * 4 * recth(w->r) * 2;
-	if (size > w->shmsize) {
-		ftruncate(w->shmfd, size);
-		wl_shm_pool_resize(w->pool, size);
-		w->shmsize = size;
+	if (size > w->d->shmsize) {
+		ftruncate(w->d->shmfd, size);
+		wl_shm_pool_resize(w->d->pool, size);
+		w->d->shmsize = size;
 	}
 
-	if (w->data) {
-		if (w->data < w->backdata)
-			munmap(w->data, w->fb.s * recth(w->fb.r) * 2);
+	if (w->d->data) {
+		if (w->d->data < w->d->backdata)
+			munmap(w->d->data, w->fb.s * recth(w->fb.r) * 2);
 		else
-			munmap(w->backdata, w->fb.s * recth(w->fb.r) * 2);
+			munmap(w->d->backdata, w->fb.s * recth(w->fb.r) * 2);
 	}
 
-	w->data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, w->shmfd, 0);
-	w->backdata = (char *) w->data + size/2;
+	w->d->data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, w->d->shmfd, 0);
+	w->d->backdata = (char *) w->d->data + size/2;
 
-	w->fb.data = w->data;
+	w->fb.data = w->d->data;
 	w->fb.r = w->r;
 	w->fb.s = rectw(w->fb.r) * 4;
 
-	w->buffer = wl_shm_pool_create_buffer(w->pool, 0, rectw(w->fb.r), recth(w->fb.r), w->fb.s, WL_SHM_FORMAT_ARGB8888);
-	w->backbuffer = wl_shm_pool_create_buffer(w->pool, size/2, rectw(w->fb.r), recth(w->fb.r), w->fb.s, WL_SHM_FORMAT_ARGB8888);
-	wl_buffer_add_listener(w->buffer, &buf_listener, w);
+	w->d->buffer = wl_shm_pool_create_buffer(w->d->pool, 0, rectw(w->fb.r), recth(w->fb.r), w->fb.s, WL_SHM_FORMAT_ARGB8888);
+	w->d->backbuffer = wl_shm_pool_create_buffer(w->d->pool, size/2, rectw(w->fb.r), recth(w->fb.r), w->fb.s, WL_SHM_FORMAT_ARGB8888);
+	wl_buffer_add_listener(w->d->buffer, &buf_listener, w);
 
-	xdg_surface_ack_configure(w->xdg_surf, w->configserial);
-	w->config = 0;
-	w->canrender = 1;
+	xdg_surface_ack_configure(w->d->xdg_surf, w->d->configserial);
+	w->d->config = 0;
+	w->d->canrender = 1;
 }
 
-void
-winopen(Win *w, Point size, char const *title)
+Win *
+winopen(Point size, char const *title)
 {
-	memset(w, 0, sizeof(*w));
+	Win *w = calloc(1, sizeof(*w));
+
+	w->d = calloc(1, sizeof(*w->d));
 
 	w->r.max = size;
 
-	w->kbctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	w->d->kbctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 
-	w->display = wl_display_connect(NULL);
-	w->registry = wl_display_get_registry(w->display);
-	wl_registry_add_listener(w->registry, &reg_listener, w);
+	w->d->display = wl_display_connect(NULL);
+	w->d->registry = wl_display_get_registry(w->d->display);
+	wl_registry_add_listener(w->d->registry, &reg_listener, w);
 
-	wl_display_roundtrip(w->display);
+	wl_display_roundtrip(w->d->display);
 
-	w->surface = wl_compositor_create_surface(w->compositor);
-	w->xdg_surf = xdg_wm_base_get_xdg_surface(w->wm, w->surface);
-	xdg_surface_add_listener(w->xdg_surf, &xdg_listener, w);
+	w->d->surface = wl_compositor_create_surface(w->d->compositor);
+	w->d->xdg_surf = xdg_wm_base_get_xdg_surface(w->d->wm, w->d->surface);
+	xdg_surface_add_listener(w->d->xdg_surf, &xdg_listener, w);
 
-	w->toplevel = xdg_surface_get_toplevel(w->xdg_surf);
-	xdg_toplevel_set_title(w->toplevel, title);
-	xdg_toplevel_add_listener(w->toplevel, &toplevel_listener, w);
+	w->d->toplevel = xdg_surface_get_toplevel(w->d->xdg_surf);
+	xdg_toplevel_set_title(w->d->toplevel, title);
+	xdg_toplevel_add_listener(w->d->toplevel, &toplevel_listener, w);
 
-	wl_surface_commit(w->surface);
-	wl_display_roundtrip(w->display);
+	wl_surface_commit(w->d->surface);
+	wl_display_roundtrip(w->d->display);
 
 	/* linux-specific */
-	w->shmfd = open(".", O_TMPFILE | O_RDWR | O_EXCL | O_CLOEXEC, 0600);
-	w->shmsize = rectw(w->r) * 4 * recth(w->r) * 2;
-	ftruncate(w->shmfd, w->shmsize);
-	w->pool = wl_shm_create_pool(w->shm, w->shmfd, w->shmsize);
+	w->d->shmfd = open(".", O_TMPFILE | O_RDWR | O_EXCL | O_CLOEXEC, 0600);
+	w->d->shmsize = rectw(w->r) * 4 * recth(w->r) * 2;
+	ftruncate(w->d->shmfd, w->d->shmsize);
+	w->d->pool = wl_shm_create_pool(w->d->shm, w->d->shmfd, w->d->shmsize);
 
 	w->fb.data = NULL;
-	w->buffer = NULL;
+	w->d->buffer = NULL;
 	doresize(w);
+
+	return w;
 }
 
 void
 winclose(Win *w)
 {
-	wl_buffer_destroy(w->buffer);
-	close(w->shmfd);
-	wl_shm_pool_destroy(w->pool);
-	xdg_toplevel_destroy(w->toplevel);
-	xdg_surface_destroy(w->xdg_surf);
-	wl_surface_destroy(w->surface);
-	wl_display_disconnect(w->display);
-	xkb_context_unref(w->kbctx);
+	wl_buffer_destroy(w->d->buffer);
+	close(w->d->shmfd);
+	wl_shm_pool_destroy(w->d->pool);
+	xdg_toplevel_destroy(w->d->toplevel);
+	xdg_surface_destroy(w->d->xdg_surf);
+	wl_surface_destroy(w->d->surface);
+	wl_display_disconnect(w->d->display);
+	xkb_context_unref(w->d->kbctx);
 }
 
 void
@@ -144,21 +152,21 @@ winflush(Win *w, Ekind wait)
 {
 	w->ev = Enone;
 	if (w->fb.damaged) {
-		while (!w->canrender)
-			wl_display_dispatch(w->display);
-		wl_surface_attach(w->surface, w->buffer, 0, 0);
-		wl_surface_damage(w->surface, w->fb.damage.min.x, w->fb.damage.min.y, w->fb.damage.max.x, w->fb.damage.max.y);
-		wl_surface_commit(w->surface);
+		while (!w->d->canrender)
+			wl_display_dispatch(w->d->display);
+		wl_surface_attach(w->d->surface, w->d->buffer, 0, 0);
+		wl_surface_damage(w->d->surface, w->fb.damage.min.x, w->fb.damage.min.y, w->fb.damage.max.x, w->fb.damage.max.y);
+		wl_surface_commit(w->d->surface);
 		w->fb.damaged = 0;
-		struct wl_buffer *b = w->buffer;
-		w->buffer = w->backbuffer;
-		w->backbuffer = b;
-		w->fb.data = w->backdata;
-		w->backdata = w->data;
-		w->data = w->fb.data;
+		struct wl_buffer *b = w->d->buffer;
+		w->d->buffer = w->d->backbuffer;
+		w->d->backbuffer = b;
+		w->fb.data = w->d->backdata;
+		w->d->backdata = w->d->data;
+		w->d->data = w->fb.data;
 	}
 	do {
-		wl_display_dispatch(w->display);
+		wl_display_dispatch(w->d->display);
 	} while (wait && !(wait & w->ev));
 	doresize(w);
 }
@@ -166,29 +174,29 @@ winflush(Win *w, Ekind wait)
 int
 winpollfd(Win *w)
 {
-	return wl_display_get_fd(w->display);
+	return wl_display_get_fd(w->d->display);
 }
 
 void
 winaddkeypress(Win *w, Keypress kp)
 {
-	w->kbuf[w->kpos++] = kp;
-	w->kpos %= 32;
-	w->klen++;
-	if (w->klen >= 32) {
-		w->klen = 32;
-		w->kcur = w->kpos;
+	w->d->kbuf[w->d->kpos++] = kp;
+	w->d->kpos %= 32;
+	w->d->klen++;
+	if (w->d->klen >= 32) {
+		w->d->klen = 32;
+		w->d->kcur = w->d->kpos;
 	}
 }
 
 Keypress
 winkeypress(Win *w)
 {
-	if (!w->klen)
+	if (!w->d->klen)
 		return (Keypress) { 0 };
-	Keypress kp = w->kbuf[w->kcur++];
-	w->kcur %= 32;
-	w->klen--;
+	Keypress kp = w->d->kbuf[w->d->kcur++];
+	w->d->kcur %= 32;
+	w->d->klen--;
 	return kp;
 }
 
@@ -202,7 +210,7 @@ static void
 bufdone(void *w_, struct wl_buffer *buf)
 {
 	Win *w = w_;
-	w->canrender = 1;
+	w->d->canrender = 1;
 }
 
 static void
@@ -210,15 +218,15 @@ newglobal(void *w_, struct wl_registry *reg, uint32_t name, char const *interfac
 {
 	Win *w = w_;
 	if (!strcmp(interface, "wl_compositor")) {
-		w->compositor = wl_registry_bind(reg, name, &wl_compositor_interface, ver);
+		w->d->compositor = wl_registry_bind(reg, name, &wl_compositor_interface, ver);
 	} else if (!strcmp(interface, "wl_shm")) {
-		w->shm = wl_registry_bind(reg, name, &wl_shm_interface, ver);
+		w->d->shm = wl_registry_bind(reg, name, &wl_shm_interface, ver);
 	} else if (!strcmp(interface, "wl_seat")) {
-		w->seat = wl_registry_bind(reg, name, &wl_seat_interface, ver);
-		wl_seat_add_listener(w->seat, &seat_listener, w);
+		w->d->seat = wl_registry_bind(reg, name, &wl_seat_interface, ver);
+		wl_seat_add_listener(w->d->seat, &seat_listener, w);
 	} else if (!strcmp(interface, "xdg_wm_base")) {
-		w->wm = wl_registry_bind(reg, name, &xdg_wm_base_interface, ver);
-		xdg_wm_base_add_listener(w->wm, &wm_listener, w);
+		w->d->wm = wl_registry_bind(reg, name, &xdg_wm_base_interface, ver);
+		xdg_wm_base_add_listener(w->d->wm, &wm_listener, w);
 	}
 }
 
@@ -233,21 +241,21 @@ inputkinds(void *w_, struct wl_seat *seat, uint32_t kinds)
 {
 	Win *w = w_;
 	if (kinds & WL_SEAT_CAPABILITY_POINTER) {
-		w->pointer = wl_seat_get_pointer(seat);
-		wl_pointer_add_listener(w->pointer, &pointer_listener, w);
+		w->d->pointer = wl_seat_get_pointer(seat);
+		wl_pointer_add_listener(w->d->pointer, &pointer_listener, w);
 	} else {
-		if (w->pointer)
-			wl_pointer_destroy(w->pointer);
-		w->pointer = NULL;
+		if (w->d->pointer)
+			wl_pointer_destroy(w->d->pointer);
+		w->d->pointer = NULL;
 	}
 
 	if (kinds & WL_SEAT_CAPABILITY_KEYBOARD) {
-		w->keyboard = wl_seat_get_keyboard(seat);
-		wl_keyboard_add_listener(w->keyboard, &kb_listener, w);
+		w->d->keyboard = wl_seat_get_keyboard(seat);
+		wl_keyboard_add_listener(w->d->keyboard, &kb_listener, w);
 	} else {
-		if (w->keyboard)
-			wl_pointer_destroy(w->pointer);
-		w->keyboard = NULL;
+		if (w->d->keyboard)
+			wl_keyboard_destroy(w->d->keyboard);
+		w->d->keyboard = NULL;
 	}
 }
 
@@ -261,23 +269,23 @@ static void
 menter(void *w_, struct wl_pointer *m, uint32_t serial, struct wl_surface *surf, wl_fixed_t x, wl_fixed_t y)
 {
 	Win *w = w_;
-	w->bufmouse = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
-	w->bufev |= Eenter | Epointer;
+	w->d->bufmouse = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
+	w->d->bufev |= Eenter | Epointer;
 }
 
 static void
 mleave(void *w_, struct wl_pointer *m, uint32_t serial, struct wl_surface *surf)
 {
 	Win *w = w_;
-	w->bufev |= Eleave;
+	w->d->bufev |= Eleave;
 }
 
 static void
 mmove(void *w_, struct wl_pointer *m, uint32_t time, wl_fixed_t x, wl_fixed_t y)
 {
 	Win *w = w_;
-	w->bufmouse = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
-	w->bufev |= Epointer;
+	w->d->bufmouse = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
+	w->d->bufev |= Epointer;
 }
 
 static void
@@ -287,24 +295,24 @@ mbutton(void *w_, struct wl_pointer *m, uint32_t serial, uint32_t time, uint32_t
 	switch (button) {
 	case BTN_LEFT:
 		if (pressed)
-			w->bufbut |= Bleft;
+			w->d->bufbut |= Bleft;
 		else
-			w->bufbut &= ~Bleft;
-		w->bufev |= Ebutton;
+			w->d->bufbut &= ~Bleft;
+		w->d->bufev |= Ebutton;
 		break;
 	case BTN_RIGHT:
 		if (pressed)
-			w->bufbut |= Bright;
+			w->d->bufbut |= Bright;
 		else
-			w->bufbut &= ~Bright;
-		w->bufev |= Ebutton;
+			w->d->bufbut &= ~Bright;
+		w->d->bufev |= Ebutton;
 		break;
 	case BTN_MIDDLE:
 		if (pressed)
-			w->bufbut |= Bmiddle;
+			w->d->bufbut |= Bmiddle;
 		else
-			w->bufbut &= ~Bmiddle;
-		w->bufev |= Ebutton;
+			w->d->bufbut &= ~Bmiddle;
+		w->d->bufev |= Ebutton;
 		break;
 	}
 }
@@ -318,21 +326,21 @@ mscroll(void *w_, struct wl_pointer *m, uint32_t time, uint32_t axis, wl_fixed_t
 		s.x = wl_fixed_to_int(value);
 	else if (axis == 0)
 		s.y = wl_fixed_to_int(value);
-	w->bufscroll = pointadd(w->bufscroll, s);
-	w->bufev |= Escroll;
+	w->d->bufscroll = pointadd(w->d->bufscroll, s);
+	w->d->bufev |= Escroll;
 }
 
 static void
 mend(void *w_, struct wl_pointer *m)
 {
 	Win *w = w_;
-	w->mouse = w->bufmouse;
-	w->scroll = pointadd(w->scroll, w->bufscroll);
-	w->bufscroll = Point(0, 0);
-	w->ev |= w->bufev;
-	w->bufev = Enone;
-	w->obut = w->but;
-	w->but = w->bufbut;
+	w->mouse = w->d->bufmouse;
+	w->scroll = pointadd(w->scroll, w->d->bufscroll);
+	w->d->bufscroll = Point(0, 0);
+	w->ev |= w->d->bufev;
+	w->d->bufev = Enone;
+	w->d->obut = w->but;
+	w->but = w->d->bufbut;
 }
 
 static void
@@ -360,14 +368,14 @@ kbmap(void *w_, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint32_t si
 	if (format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
 		char *map = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
 
-		xkb_keymap_unref(w->kbmap);
-		w->kbmap = xkb_keymap_new_from_string(w->kbctx, map, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+		xkb_keymap_unref(w->d->kbmap);
+		w->d->kbmap = xkb_keymap_new_from_string(w->d->kbctx, map, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
 
 		munmap(map, size);
 		close(fd);
 
-		xkb_state_unref(w->kbstate);
-		w->kbstate = xkb_state_new(w->kbmap);
+		xkb_state_unref(w->d->kbstate);
+		w->d->kbstate = xkb_state_new(w->d->kbmap);
 	}
 }
 
@@ -378,7 +386,7 @@ kbenter(void *w_, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *su
 	uint32_t *k;
 	Keypress kp = { .pressed = 1, .time = 0 };
 	wl_array_for_each(k, keys) {
-		kp.key = xkb_state_key_get_one_sym(w->kbstate, *k + 8);
+		kp.key = xkb_state_key_get_one_sym(w->d->kbstate, *k + 8);
 		winaddkeypress(w, kp);
 		w->ev |= Ekey;
 	}
@@ -395,7 +403,7 @@ kbkey(void *w_, struct wl_keyboard *kb, uint32_t serial, uint32_t time, uint32_t
 {
 	Win *w = w_;
 	Keypress kp = { .pressed = state, .time = time };
-	kp.key = xkb_state_key_get_one_sym(w->kbstate, key + 8);
+	kp.key = xkb_state_key_get_one_sym(w->d->kbstate, key + 8);
 	winaddkeypress(w, kp);
 	w->ev |= Ekey;
 }
@@ -404,7 +412,7 @@ static void
 kbmod(void *w_, struct wl_keyboard *kb, uint32_t serial, uint32_t pressed, uint32_t latched, uint32_t locked, uint32_t group)
 {
 	Win *w = w_;
-	xkb_state_update_mask(w->kbstate, pressed, latched, locked, 0, 0, group);
+	xkb_state_update_mask(w->d->kbstate, pressed, latched, locked, 0, 0, group);
 }
 
 static void
@@ -424,8 +432,8 @@ static void
 setconfig(void *w_, struct xdg_surface *xdg, uint32_t serial)
 {
 	Win *w = w_;
-	w->config = 1;
-	w->configserial = serial;
+	w->d->config = 1;
+	w->d->configserial = serial;
 }
 
 static void

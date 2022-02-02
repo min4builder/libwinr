@@ -10,64 +10,79 @@
 #define SSFN_IMPLEMENTATION
 #include "ssfn.h"
 
-void
-fontopen(Font *f, char const *name, int size)
+struct Font {
+	int size;
+	ssfn_t ctx;
+};
+
+Font *
+fontopen(char const *name, int size)
 {
 	char path[4096];
-	char const *fontpath = getenv("FONTPATH");
-	char const *nextpath;
+	char const *fontpath, *nextpath;
+	Font *f;
+	int fd;
+	int err;
+	ssize_t len, r;
+	char *data;
+
+	fontpath = getenv("FONTPATH");
 	if (!fontpath)
 		fontpath = ".";
+
+	f = calloc(1, sizeof(*f));
+
 	while (*fontpath) {
 		nextpath = strchr(fontpath, ':');
 		if (!nextpath)
 			nextpath = strchr(fontpath, '\0');
+
 		snprintf(path, sizeof(path), "%.*s/%s.sfn", (int) (nextpath - fontpath), fontpath, name);
 		fontpath = *nextpath ? nextpath + 1 : nextpath;
 
-		fprintf(stderr, "trying '%s' for '%s'...\n", path, name);
-		int fd = open(path, O_RDONLY);
+		fd = open(path, O_RDONLY);
 		if (fd < 0) {
 			if (*fontpath)
 				continue;
 			perror("fontopen");
-			return;
+			free(f);
+			return 0;
 		}
 
-		ssize_t len = lseek(fd, 0, SEEK_END);
+		len = lseek(fd, 0, SEEK_END);
 		if (len < 0) {
 			perror("fontopen");
-			return;
+			free(f);
+			return 0;
 		}
 
-		char *data = malloc(len);
-		size_t r = 0;
-		while (r < (size_t) len)
+		data = malloc(len);
+		r = 0;
+		while (r < len)
 			r += pread(fd, data + r, len - r, r);
 
-		f->ctx = calloc(1, sizeof(ssfn_t));
-		if (!f->ctx) {
-			perror("fontopen");
-			return;
-		}
-
-		int err = ssfn_load(f->ctx, data);
+		err = ssfn_load(&f->ctx, data);
 		if (err) {
 			fprintf(stderr, "fontopen: %s\n", ssfn_error(err));
-			return;
+			free(f);
+			return 0;
 		}
 		break;
 	}
 	f->size = size;
-	int err = ssfn_select(f->ctx, SSFN_FAMILY_ANY, NULL, SSFN_STYLE_REGULAR, f->size);
+	err = ssfn_select(&f->ctx, SSFN_FAMILY_ANY, NULL, SSFN_STYLE_REGULAR, f->size);
 	if (err)
 		fprintf(stderr, "fontopen: %s\n", ssfn_error(err));
+	return f;
 }
 
 void
 fontset(Font *f, int attr)
 {
-	int style = SSFN_STYLE_ABS_SIZE;
+	int err;
+	int style;
+
+	style = SSFN_STYLE_ABS_SIZE;
 	if (attr & Fbold)
 		style |= SSFN_STYLE_BOLD;
 	if (attr & Fitalic)
@@ -78,7 +93,8 @@ fontset(Font *f, int attr)
 		style |= SSFN_STYLE_STHROUGH;
 	if (attr & Frtl)
 		style |= SSFN_STYLE_RTL;
-	int err = ssfn_select(f->ctx, SSFN_FAMILY_ANY, NULL, style, f->size);
+
+	err = ssfn_select(&f->ctx, SSFN_FAMILY_ANY, NULL, style, f->size);
 	if (err)
 		printf("fontselect: %s\n", ssfn_error(err));
 }
@@ -97,8 +113,10 @@ drawtext(Fb *fb, Font *f, Point p, int color, char const *s, int len)
 	};
 	Point max = Point(0, 0);
 	int prog = 0;
+	int n;
+
 	while (len < 0 ? s[prog] : prog < len) {
-		int n = ssfn_render(f->ctx, &dst, s + prog);
+		n = ssfn_render(&f->ctx, &dst, s + prog);
 		if (max.x < dst.x)
 			max.x = dst.x;
 		if (max.y < dst.y)
@@ -117,7 +135,7 @@ drawtext(Fb *fb, Font *f, Point p, int color, char const *s, int len)
 void
 fontclose(Font *f)
 {
-	ssfn_free(f->ctx);
-	free(f->ctx);
+	ssfn_free(&f->ctx);
+	free(f);
 }
 
