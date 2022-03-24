@@ -1,8 +1,7 @@
 struct Display {
-	Button obut;
-	int klen;
-	Keypress kbuf[32];
-	int kpos, kcur;
+	int elen;
+	Event ebuf[32];
+	int epos, ecur;
 
 	struct wl_display *display;
 	struct wl_registry *registry;
@@ -18,9 +17,6 @@ struct Display {
 	unsigned configserial;
 
 	struct wl_pointer *pointer;
-	Point bufmouse, bufscroll;
-	Ekind bufev;
-	Button bufbut;
 	struct wl_keyboard *keyboard;
 	struct xkb_state *kbstate;
 	struct xkb_context *kbctx;

@@ -29,30 +29,32 @@ This is alpha software. There will be some rough edges. Be careful.
     main()
     {
         char buf[32];
-        Keypress kp;
+        int buflen = 0;
         Win *w;
         Font *f;
 
         w = winopen(Point(800, 600), "winr example");
         f = fontopen("monospace", 16);
 
-        w->ev = Eframe;
+        w->listen = Eclosed | Eframe | Ekey;
 
+        Event ev;
         do {
-            if (w->ev & Eframe) {
+            ev = winevent(w);
+            if (ev.kind & Ekey) {
+                buflen = winkeytext(ev, buf, sizeof(buf));
+            }
+            if (ev.kind & (Eframe | Ekey)) {
                 drawrect(&w->fb, w->fb.r, 0xffffffff);
-                drawtext(&w->fb, &f, w->fb.r.min, 0xff000000, "Hello, world!", -1);
+                drawtext(&w->fb, f, w->fb.r.min, 0xff000000, "Hello, world!", -1);
+                if (buflen > 0)
+                    drawtext(&w->fb, f, w->fb.r.min, 0xff444444, buf, buflen);
+                winflush(w);
             }
-            if (w->ev & Ekey) {
-                kp = winkeypress(w);
-                if (winkeytext(kp, buf, sizeof(buf)) > 0)
-                    drawtext(&w->fb, &f, w->fb.r.min, 0xff444444, buf, -1);
-            }
-            winflush(w, Eclosed | Eframe | Ekey);
-        } while (!(w->ev & Eclosed));
+        } while (!(ev.kind & Eclosed));
 
-        winclose(w);
         fontclose(f);
+        winclose(w);
 
         return 0;
     }

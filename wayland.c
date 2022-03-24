@@ -1,6 +1,5 @@
 #define _GNU_SOURCE /* ugh */
 #include <fcntl.h>
-#include <linux/input-event-codes.h> /* BTN_* constants */
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -131,6 +130,9 @@ winopen(Point size, char const *title)
 	w->d->buffer = NULL;
 	doresize(w);
 
+	Event e = { .kind = Eframe };
+	winaddevent(w, e);
+
 	return w;
 }
 
@@ -148,9 +150,8 @@ winclose(Win *w)
 }
 
 void
-winflush(Win *w, Ekind wait)
+winflush(Win *w)
 {
-	w->ev = Enone;
 	if (w->fb.damaged) {
 		while (!w->d->canrender)
 			wl_display_dispatch(w->d->display);
@@ -165,9 +166,6 @@ winflush(Win *w, Ekind wait)
 		w->d->backdata = w->d->data;
 		w->d->data = w->fb.data;
 	}
-	do {
-		wl_display_dispatch(w->d->display);
-	} while (wait && !(wait & w->ev));
 	doresize(w);
 }
 
@@ -178,32 +176,32 @@ winpollfd(Win *w)
 }
 
 void
-winaddkeypress(Win *w, Keypress kp)
+winaddevent(Win *w, Event e)
 {
-	w->d->kbuf[w->d->kpos++] = kp;
-	w->d->kpos %= 32;
-	w->d->klen++;
-	if (w->d->klen >= 32) {
-		w->d->klen = 32;
-		w->d->kcur = w->d->kpos;
+	w->d->ebuf[w->d->epos++] = e;
+	w->d->epos %= 32;
+	w->d->elen++;
+	if (w->d->elen >= 32) {
+		w->d->elen = 32;
+		w->d->ecur = w->d->epos;
 	}
 }
 
-Keypress
-winkeypress(Win *w)
+Event
+winevent(Win *w)
 {
-	if (!w->d->klen)
-		return (Keypress) { 0 };
-	Keypress kp = w->d->kbuf[w->d->kcur++];
-	w->d->kcur %= 32;
-	w->d->klen--;
-	return kp;
+	while (!w->d->elen)
+		wl_display_dispatch(w->d->display);
+	Event e = w->d->ebuf[w->d->ecur++];
+	w->d->ecur %= 32;
+	w->d->elen--;
+	return e;
 }
 
 int
-winkeytext(Keypress kp, char *buf, int len)
+winkeytext(Event e, char *buf, int len)
 {
-	return xkb_keysym_to_utf8(kp.key, buf, len);
+	return xkb_keysym_to_utf8(e.key.key, buf, len);
 }
 
 static void
@@ -269,78 +267,64 @@ static void
 menter(void *w_, struct wl_pointer *m, uint32_t serial, struct wl_surface *surf, wl_fixed_t x, wl_fixed_t y)
 {
 	Win *w = w_;
-	w->d->bufmouse = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
-	w->d->bufev |= Eenter | Epointer;
+	Event e = { .kind = Eenter };
+	e.pos = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
+	winaddevent(w, e);
 }
 
 static void
 mleave(void *w_, struct wl_pointer *m, uint32_t serial, struct wl_surface *surf)
 {
 	Win *w = w_;
-	w->d->bufev |= Eleave;
+	Event e = { .kind = Eleave };
+	winaddevent(w, e);
 }
 
 static void
 mmove(void *w_, struct wl_pointer *m, uint32_t time, wl_fixed_t x, wl_fixed_t y)
 {
 	Win *w = w_;
-	w->d->bufmouse = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
-	w->d->bufev |= Epointer;
+	Event e = { .kind = Epointer, .time = time };
+	e.pos = Point(wl_fixed_to_int(x), wl_fixed_to_int(y));
+	winaddevent(w, e);
 }
 
 static void
 mbutton(void *w_, struct wl_pointer *m, uint32_t serial, uint32_t time, uint32_t button, uint32_t pressed)
 {
 	Win *w = w_;
+	Event e = { .kind = Ebutton, .time = time };
+	e.key.press = pressed;
 	switch (button) {
-	case BTN_LEFT:
-		if (pressed)
-			w->d->bufbut |= Bleft;
-		else
-			w->d->bufbut &= ~Bleft;
-		w->d->bufev |= Ebutton;
+	case 0x110:
+		e.key.key = Bleft;
 		break;
-	case BTN_RIGHT:
-		if (pressed)
-			w->d->bufbut |= Bright;
-		else
-			w->d->bufbut &= ~Bright;
-		w->d->bufev |= Ebutton;
+	case 0x111:
+		e.key.key = Bright;
 		break;
-	case BTN_MIDDLE:
-		if (pressed)
-			w->d->bufbut |= Bmiddle;
-		else
-			w->d->bufbut &= ~Bmiddle;
-		w->d->bufev |= Ebutton;
+	case 0x112:
+		e.key.key = Bmiddle;
 		break;
 	}
+	winaddevent(w, e);
 }
 
 static void
 mscroll(void *w_, struct wl_pointer *m, uint32_t time, uint32_t axis, wl_fixed_t value)
 {
 	Win *w = w_;
-	Point s = { 0, 0 };
+	Event e = { .kind = Escroll, .time = time };
 	if (axis == 1)
-		s.x = wl_fixed_to_int(value);
+		e.pos.x = wl_fixed_to_int(value);
 	else if (axis == 0)
-		s.y = wl_fixed_to_int(value);
-	w->d->bufscroll = pointadd(w->d->bufscroll, s);
-	w->d->bufev |= Escroll;
+		e.pos.y = wl_fixed_to_int(value);
+	winaddevent(w, e);
 }
 
 static void
 mend(void *w_, struct wl_pointer *m)
 {
-	Win *w = w_;
-	w->mouse = w->d->bufmouse;
-	w->scroll = pointadd(w->scroll, w->d->bufscroll);
-	w->d->bufscroll = Point(0, 0);
-	w->ev |= w->d->bufev;
-	w->d->bufev = Enone;
-	w->d->obut = w->but;
-	w->but = w->d->bufbut;
+	return;
 }
 
 static void
@@ -384,11 +368,10 @@ kbenter(void *w_, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *su
 {
 	Win *w = w_;
 	uint32_t *k;
-	Keypress kp = { .pressed = 1, .time = 0 };
+	Event e = { .kind = Ekey, .key = { .press = 1 } };
 	wl_array_for_each(k, keys) {
-		kp.key = xkb_state_key_get_one_sym(w->d->kbstate, *k + 8);
-		winaddkeypress(w, kp);
-		w->ev |= Ekey;
+		e.key.key = xkb_state_key_get_one_sym(w->d->kbstate, *k + 8);
+		winaddevent(w, e);
 	}
 }
 
@@ -402,10 +385,10 @@ static void
 kbkey(void *w_, struct wl_keyboard *kb, uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
 	Win *w = w_;
-	Keypress kp = { .pressed = state, .time = time };
-	kp.key = xkb_state_key_get_one_sym(w->d->kbstate, key + 8);
-	winaddkeypress(w, kp);
-	w->ev |= Ekey;
+	Event e = { .kind = Ekey, .time = time };
+	e.key.press = state;
+	e.key.key = xkb_state_key_get_one_sym(w->d->kbstate, key + 8);
+	winaddevent(w, e);
 }
 
 static void
@@ -441,8 +424,10 @@ winconfig(void *w_, struct xdg_toplevel *toplevel, int32_t width, int32_t height
 {
 	Win *w = w_;
 	if (width || height) {
-		if (width != rectw(w->r) || height != recth(w->r))
-			w->ev |= Eframe | Eresized;
+		if (width != rectw(w->r) || height != recth(w->r)) {
+			Event e = { .kind = Eframe | Eresized };
+			winaddevent(w, e);
+		}
 		w->r = Rect(Point(0, 0), Point(width, height));
 	}
 }
@@ -451,6 +436,7 @@ static void
 winclosed(void *w_, struct xdg_toplevel *toplevel)
 {
 	Win *w = w_;
-	w->ev |= Eclosed;
+	Event e = { .kind = Eclosed };
+	winaddevent(w, e);
 }
 
